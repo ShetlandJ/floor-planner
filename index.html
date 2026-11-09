@@ -216,7 +216,6 @@ const CATALOG = [
   {cat:'Living', name:'TV', shape:'tv', w:120, h:10},
   {cat:'Living', name:'Bookcase', shape:'drawers', w:80, h:30},
   {cat:'Living', name:'Rug', shape:'rug', w:200, h:140},
-  {cat:'Living', name:'Plant', shape:'plant', w:40, h:40},
   {cat:'Dining & office', name:'Dining table', shape:'table', w:160, h:90},
   {cat:'Dining & office', name:'Round table', shape:'roundtable', w:110, h:110},
   {cat:'Dining & office', name:'Chair', shape:'chair', w:45, h:50},
@@ -243,6 +242,16 @@ const CATALOG = [
   {cat:'Bathroom', name:'Basin', shape:'basin', w:55, h:45},
   {cat:'Bathroom', name:'Vanity unit', shape:'basin', w:80, h:45},
   {cat:'Bathroom', name:'Towel radiator', shape:'radiator', w:50, h:10},
+  {cat:'Decor', name:'Plant (large)', shape:'plant', w:50, h:50},
+  {cat:'Decor', name:'Plant (small)', shape:'plant', w:30, h:30},
+  {cat:'Decor', name:'Floor lamp', shape:'lamp', w:40, h:40},
+  {cat:'Decor', name:'Table lamp', shape:'lamp', w:25, h:25},
+  {cat:'Decor', name:'Coffee machine', shape:'coffee', w:30, h:40},
+  {cat:'Decor', name:'Vase', shape:'vase', w:20, h:20},
+  {cat:'Decor', name:'Picture', shape:'picture', w:80, h:4},
+  {cat:'Decor', name:'Small picture', shape:'picture', w:40, h:3},
+  {cat:'Decor', name:'Wall mirror', shape:'mirror', w:60, h:4},
+  {cat:'Decor', name:'Full-length mirror', shape:'mirror', w:50, h:6},
   {cat:'Other', name:'Radiator', shape:'radiator', w:100, h:10},
   {cat:'Other', name:'Stairs', shape:'stairs', w:90, h:250},
   {cat:'Other', name:'Boiler', shape:'kbase', w:45, h:35, label:true},
@@ -521,7 +530,16 @@ function drawShape(shape, w, h, fillOverride){
     case 'drawers': { let s = R(x0,y0,w,h); for (let i = 1; i < 3; i++) s += L(x0, y0+h*i/3, x0+w, y0+h*i/3); return s; }
     case 'tv': return R(x0,y0,w,h,'#3a3a3a');
     case 'rug': return R(x0,y0,w,h,fill,'stroke-dasharray="6 4"') + R(x0+6,y0+6,w-12,h-12,'none','stroke-dasharray="2 3"');
-    case 'plant': return C(0,0,m/2,'#e3eedd') + C(0,0,m/4,'#cfe2c4') + L(-m/3,-m/3,m/3,m/3) + L(m/3,-m/3,-m/3,m/3);
+    case 'plant': {   // leaves radiating from a pot
+      let s = '';
+      for (let a = 0; a < 360; a += 45) s += `<ellipse cx="${r1(m*.26)}" cy="0" rx="${r1(m*.24)}" ry="${r1(m*.1)}" transform="rotate(${a + 20})" fill="#c9dfbd" ${S}/>`;
+      return s + C(0,0,m*.15,'#b9a48c');
+    }
+    case 'lamp': return C(0,0,m/2,'#fbf3dc') + C(0,0,m*.3,'#f3e2b0') + C(0,0,m*.08,'#c9a95c');
+    case 'coffee': return R(x0,y0,w,h,'#4a4744','rx="3"') + R(x0+3,y0+3,w*.4,h*.35,'#9fb6c1','rx="2"') + C(0, y0+h*.72, m*.16, '#fff');
+    case 'vase': return C(0,0,m/2,'#e3ecf0') + C(0,0,m*.3,'#fff') + C(-m*.08,-m*.06,m*.08,'#e2a3a3') + C(m*.1,-m*.02,m*.08,'#e6c97a') + C(0,m*.1,m*.08,'#b9d3a6');
+    case 'picture': return R(x0,y0,w,h,'#7b6450') + `<rect x="${r1(x0+3)}" y="${r1(-h/6)}" width="${r1(w-6)}" height="${r1(h/3)}" fill="#e3d6c4"/>`;
+    case 'mirror': return R(x0,y0,w,h,'#d6e7ef') + L(x0+w*.2, y0+h, x0+w*.35, y0) + L(x0+w*.3, y0+h, x0+w*.45, y0);
     case 'kbase': return R(x0,y0,w,h) + L(x0+3,y0+h-4,x0+w-3,y0+h-4);
     case 'kwall': return R(x0,y0,w,h,fill,'stroke-dasharray="5 3"') + L(x0,y0,x0+w,y0+h,'stroke-dasharray="5 3"') + L(x0+w,y0,x0,y0+h,'stroke-dasharray="5 3"');
     case 'sink': {
@@ -562,6 +580,13 @@ function drawShape(shape, w, h, fillOverride){
     }
     default: return R(x0,y0,w,h);
   }
+}
+// Stacking order for furniture: higher draws on top. Rugs start underneath everything.
+const layerOf = it => it.z ?? (it.shape === 'rug' ? -10 : 0);
+function setLayer(it, where){
+  const others = doc.items.filter(o => o !== it).map(layerOf);
+  if (!others.length) return;
+  it.z = where === 'front' ? Math.max(...others) + 1 : Math.min(...others) - 1;
 }
 function itemSVG(it){
   let s = `<g data-kind="item" data-id="${it.id}" transform="translate(${r1(it.x)} ${r1(it.y)}) rotate(${r1(it.rot)})">${drawShape(it.shape, it.w, it.h)}`;
@@ -641,7 +666,7 @@ function bounds(){
 }
 function sceneSVG(px){   // px = screen pixels per cm (for text sizing)
   let s = '';
-  for (const it of doc.items) s += itemSVG(it);
+  doc.items.map((it, i) => [layerOf(it), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).forEach(([, , it]) => s += itemSVG(it));
   for (const w of doc.walls) s += `<polygon data-kind="wall" data-id="${w.id}" points="${ptsStr(wallPoly(w))}" fill="${WALL_FILL}"/>`;
   for (const o of doc.openings){ const w = getWall(o.wallId); if (w) s += openingSVG(o, w); }
   // dimensions
@@ -1377,6 +1402,7 @@ document.addEventListener('keydown', e => {
   else if (k === 't') setTool('text');
   else if (k === 'r') rotateSelected(e.shiftKey ? -90 : 90);
   else if (k === 'f'){ fitView(); render(); }
+  else if ((e.key === ']' || e.key === '[') && sel && sel.kind === 'item'){ setLayer(selected(), e.key === ']' ? 'front' : 'back'); commit(); }
   else if (k === '=' || k === '+') zoomAt(1.25);
   else if (k === '-') zoomAt(.8);
 });
@@ -1415,6 +1441,7 @@ const SYNONYMS = {
   tv:'aerial coax television', data:'ethernet internet wifi network cat6', thermo:'heating', smoke:'fire detector', fan:'extractor vent',
   bed:'sleep', sofa:'couch settee', table:'', toilet:'wc loo', basin:'sink', bath:'tub', shower:'', kbase:'cupboard cabinet', kwall:'cupboard cabinet',
   wardrobe:'closet', drawers:'dresser', hob:'cooker stove', washer:'laundry', radiator:'heater heating', stairs:'staircase steps', rug:'carpet',
+  plant:'plants flowers greenery pot houseplant', lamp:'lamps light lighting', coffee:'espresso kettle appliance', vase:'vases flowers', picture:'pictures art painting frame print photo', mirror:'mirrors glass',
 };
 function libEntries(){
   const out = [];
@@ -1515,7 +1542,7 @@ function renderPanel(){
       <p class="note">1. <b>Room by size</b>: type the inside measurements.<br>2. Draw interior <b>walls</b> across it to split it up. Click a wall to type its exact length.<br>3. Add doors, windows, furniture and sockets from the left.<br>4. <b>Copy link</b> and send it to yourself to open the plan on another computer.</p>
       <div class="keys">
         <kbd>W</kbd><span>Draw walls</span><kbd>D</kbd> <span>Door</span><kbd>N</kbd><span>Window</span><kbd>T</kbd><span>Label</span><kbd>M</kbd><span>Measure</span>
-        <kbd>R</kbd><span>Rotate selected 90°</span><kbd>⌘/Ctrl C · V</kbd><span>Copy · paste at mouse</span><kbd>⌘/Ctrl D</kbd><span>Duplicate</span><kbd>Del</kbd><span>Delete</span>
+        <kbd>R</kbd><span>Rotate selected 90°</span><kbd>] · [</kbd><span>Bring to front · send to back</span><kbd>⌘/Ctrl C · V</kbd><span>Copy · paste at mouse</span><kbd>⌘/Ctrl D</kbd><span>Duplicate</span><kbd>Del</kbd><span>Delete</span>
         <kbd>Arrows</kbd><span>Nudge 1 cm (Shift: 10)</span><kbd>⌘/Ctrl Z</kbd><span>Undo</span><kbd>F</kbd><span>Fit to screen</span>
         <kbd>Space</kbd><span>Hold + drag to pan</span><kbd>Shift</kbd><span>Turn off snapping</span>
       </div>`;
@@ -1541,7 +1568,8 @@ function renderPanel(){
       fld('Width', num('pW', obj.w, 'cm', 'min="5"')) + fld('Depth', num('pH', obj.h, 'cm', 'min="5"')) +
       fld('Rotation', num('pRot', obj.rot, '°')) +
       fld('Show name', `<input type="checkbox" id="pShow" ${obj.showLabel ? 'checked' : ''} style="justify-self:start">`) +
-      `<div class="btnrow"><button id="pRot90">Rotate 90°</button><button id="pDup">Duplicate</button><button id="pDel" class="danger">Delete</button></div>
+      `<div class="btnrow"><button id="pFront" title="Bring to front ( ] )">Bring to front</button><button id="pBack" title="Send to back ( [ )">Send to back</button></div>
+       <div class="btnrow"><button id="pRot90">Rotate 90°</button><button id="pDup">Duplicate</button><button id="pDel" class="danger">Delete</button></div>
        <p class="note">Drag corners to resize, the top dot to rotate. Items snap flush against walls (hold Alt to stop that).</p>`;
   } else if (sel.kind === 'elec'){
     const T = ELEC[obj.type];
@@ -1599,6 +1627,7 @@ $('#right').addEventListener('click', e => {
   else if (id === 'pRot90') rotateSelected(90);
   else if (id === 'pSplit'){ splitWall(obj); commit(); }
   else if (id === 'pFlip'){ flipDoor(obj); commit(); }
+  else if (id === 'pFront' || id === 'pBack'){ setLayer(obj, id === 'pFront' ? 'front' : 'back'); commit(); }
   else if (id === 'pFlipX'){ obj.flipX = !obj.flipX; commit(); }
   else if (id === 'pFlipY'){ obj.flipY = !obj.flipY; commit(); }
 });
