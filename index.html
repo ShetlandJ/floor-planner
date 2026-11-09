@@ -119,6 +119,7 @@ dialog h3{margin:0 0 12px}
       <div class="pop">
         <button data-act="savefile">Save to file<small>Download a .json file of this plan</small></button>
         <button data-act="openfile">Open file<small>Load a .json plan file</small></button>
+        <button data-act="code">Import / export code<small>Copy this plan as text, or paste one in</small></button>
         <button data-act="png">Download image<small>PNG of the plan</small></button>
         <button data-act="print">Print / PDF</button>
       </div>
@@ -156,6 +157,19 @@ dialog h3{margin:0 0 12px}
 
   <aside id="right"></aside>
 </div>
+
+<dialog id="codeDlg" style="width:480px">
+  <h3>Import / export code</h3>
+  <p class="note" style="margin-top:-6px">This plan as text. Copy it to send or keep somewhere.</p>
+  <textarea id="codeOut" rows="4" readonly style="width:100%;font:11px ui-monospace,Menlo,monospace"></textarea>
+  <div class="btnrow"><button id="codeCopy">Copy code</button></div>
+  <p class="note">Or paste a plan code (or a plan link) here to add it:</p>
+  <textarea id="codeIn" rows="4" style="width:100%;font:11px ui-monospace,Menlo,monospace" placeholder="Paste code here"></textarea>
+  <div class="btnrow" style="justify-content:flex-end;margin-bottom:0">
+    <button id="codeClose">Close</button>
+    <button id="codeImport" class="primary">Import</button>
+  </div>
+</dialog>
 
 <dialog id="roomDlg">
   <form method="dialog" id="roomForm">
@@ -433,6 +447,28 @@ function importPlan(p, source){
   }
   plans[p.id] = p; setCurrent(p.id);
 }
+async function openCodeDialog(){
+  $('#codeIn').value = ''; $('#codeOut').value = 'Working…';
+  $('#codeDlg').showModal();
+  $('#codeOut').value = await encodePlan(doc);
+}
+$('#codeCopy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText($('#codeOut').value); toast('Code copied.'); }
+  catch(e){ $('#codeOut').select(); toast('Press Ctrl/Cmd+C to copy.'); }
+});
+$('#codeClose').addEventListener('click', () => $('#codeDlg').close());
+$('#codeImport').addEventListener('click', async () => {
+  // accepts: raw JSON, a compressed plan code, or a full link containing #plan=
+  let s = $('#codeIn').value.trim(); if (!s) return;
+  try {
+    let p;
+    if (s.startsWith('{')) p = JSON.parse(s);
+    else { const m = s.match(/plan=([\w-]+)/); p = await decodePlan(m ? m[1] : s.replace(/\s+/g, '')); }
+    if (!validPlan(p)) throw new Error('bad');
+    $('#codeDlg').close(); importPlan(p, 'pasted code');
+  } catch(e){ toast('That code couldn’t be read. Check it was copied in full.'); }
+});
+
 async function copyLink(){
   try {
     const data = await encodePlan(doc);
@@ -1519,6 +1555,7 @@ $('#moreMenu .pop').addEventListener('click', e => {
   const act = b.dataset.act;
   if (act === 'savefile') downloadBlob(new Blob([JSON.stringify(doc, null, 1)], {type:'application/json'}), fileSafe(doc.name) + '.json');
   if (act === 'openfile') $('#fileInput').click();
+  if (act === 'code') openCodeDialog();
   if (act === 'png') exportPNG();
   if (act === 'print'){ sel = null; fitView(); render(); setTimeout(() => window.print(), 50); }
 });
