@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Floor Planner</title>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}
+</script>
 <style>
 :root{
   --bg:#f3f1ed; --panel:#fbfaf8; --ink:#23211e; --muted:#6f6a63; --line:#ddd8d0;
@@ -107,6 +110,7 @@ dialog h3{margin:0 0 12px}
     <button id="btnRedo" title="Redo (Ctrl/Cmd+Shift+Z)">Redo</button>
     <span class="grow"></span>
     <span id="saveState"></span>
+    <button id="btnWalk" title="Walk around the plan in 3D">3D walk-through</button>
     <select id="units" title="Units">
       <option value="m">Metres</option>
       <option value="cm">Centimetres</option>
@@ -1815,6 +1819,20 @@ $('#btnDel').addEventListener('click', () => {
 $('#btnUndo').addEventListener('click', undo);
 $('#btnRedo').addEventListener('click', redo);
 $('#btnLink').addEventListener('click', copyLink);
+// 3D walk-through lives in walk.js (three.js from a CDN), loaded the first time it's opened.
+const WALK_VERSION = 1;
+let walkMod = null;
+async function openWalk(){
+  if (!doc.walls.length){ toast('Draw some walls first, then walk around them in 3D.'); return; }
+  if (!walkMod){
+    toast('Loading 3D…');
+    try { walkMod = await import(`./walk.js?v=${WALK_VERSION}`); }
+    catch(e){ console.error(e); toast('Could not load the 3D view. Check the internet connection.'); return; }
+  }
+  walkMod.openWalk({doc, view, bounds, sceneSVG, findRooms, pointInPoly, joinAt, wallLen, wallDir, wallNormal, elecPos, ELEC});
+  $('#toast').classList.remove('show');
+}
+$('#btnWalk').addEventListener('click', openWalk);
 $('#btnMore').addEventListener('click', e => { e.stopPropagation(); $('#moreMenu').classList.toggle('open'); });
 document.addEventListener('click', () => $('#moreMenu').classList.remove('open'));
 $('#moreMenu .pop').addEventListener('click', e => {
