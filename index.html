@@ -60,6 +60,10 @@ main{position:relative;min-width:0;min-height:0;overflow:hidden;background:#fff}
 #status{position:absolute;left:10px;bottom:8px;background:rgba(251,250,248,.92);border:1px solid var(--line);border-radius:6px;padding:4px 8px;color:var(--muted);font-size:12px;pointer-events:none}
 #zoom{position:absolute;right:10px;bottom:8px;display:flex;gap:4px}
 #zoom button{padding:4px 9px}
+#modes{position:absolute;left:10px;top:10px;display:flex;gap:2px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:3px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+#modes button{border:0;background:none;padding:5px 7px;border-radius:6px;display:flex;align-items:center;color:var(--muted)}
+#modes button.on{background:var(--accent-soft);color:var(--ink)}
+#cv.pointer{cursor:default}
 #right h3{margin:0 0 10px;font-size:14px}
 .field{display:grid;grid-template-columns:105px 1fr;align-items:center;gap:8px;margin-bottom:8px}
 .field label{color:var(--muted)}
@@ -84,7 +88,7 @@ dialog h3{margin:0 0 12px}
 .menu .pop button{display:block;width:100%;text-align:left;border:0;padding:8px 10px}
 .menu .pop button small{display:block;color:var(--muted);font-size:11.5px;white-space:normal}
 @media print{
-  header,aside,#status,#zoom,#hint,#toast{display:none!important}
+  header,aside,#status,#zoom,#modes,#hint,#toast{display:none!important}
   #app{display:block;height:auto}
   main{height:100vh}
   #gridRect,#overlay{display:none}
@@ -152,6 +156,10 @@ dialog h3{margin:0 0 12px}
     </svg>
     <div id="hint"><b>Empty plan</b>Start with <em>Room by size</em> on the left and type in the measurements, or press <kbd>W</kbd> and click to draw walls.</div>
     <div id="status"></div>
+    <div id="modes">
+      <button data-mode="pointer" title="Pointer (V): drag a box to select several things"><svg width="18" height="18" viewBox="0 0 24 24"><path d="M5 3l14 8-6 2-3 6z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></button>
+      <button data-mode="hand" title="Hand (H): drag to move around the plan"><svg width="18" height="18" viewBox="0 0 24 24"><path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11M11 10V4a1.5 1.5 0 0 1 3 0v6M14 10V5.5a1.5 1.5 0 0 1 3 0V13c0 4-2.5 7-6 7-2.5 0-4-1.3-5.5-3.5L3.3 13.2a1.4 1.4 0 0 1 2.2-1.7L8 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    </div>
     <div id="zoom">
       <button id="zOut" title="Zoom out">−</button>
       <button id="zFit" title="Fit plan to screen (F)">Fit</button>
@@ -304,6 +312,8 @@ let undoStack = [], redoStack = [], lastSnap = null;
 let libTab = 'build';
 let hoverWorld = null;
 let lastDown = null;
+// 'pointer': dragging empty space draws a selection box. 'hand': dragging empty space pans. Remembered per browser.
+let selMode = (() => { try { return localStorage.getItem('floorplanner.mode') === 'hand' ? 'hand' : 'pointer'; } catch { return 'pointer'; } })();
 
 const $ = s => document.querySelector(s);
 const svg = $('#cv');
@@ -890,6 +900,10 @@ function renderOverlay(){
       }
     }
   }
+  if (drag && drag.type === 'box' && drag.moved){
+    const x = Math.min(drag.a.x, drag.b.x), y = Math.min(drag.a.y, drag.b.y);
+    s += `<rect x="${x}" y="${y}" width="${Math.abs(drag.a.x - drag.b.x)}" height="${Math.abs(drag.a.y - drag.b.y)}" fill="${A}" fill-opacity=".08" stroke="${A}" stroke-width="${sw}" stroke-dasharray="${5/px} ${3/px}" pointer-events="none"/>`;
+  }
   // tool ghosts
   const td = toolData;
   if (tool === 'wall' && td.start && td.cur){
@@ -922,7 +936,9 @@ function renderOverlay(){
   else if (tool === 'place') st = td.what === 'elec' ? `Click to place a ${ELEC[td.type].name.toLowerCase()} — it sticks to the nearest wall · Esc to stop` : `Click to place ${td.def.name.toLowerCase()} · it snaps against walls`;
   else if (tool === 'measure') st = 'Click two points to measure · Esc to stop';
   else if (tool === 'text') st = 'Click where the label should go';
-  else st = 'Drag empty space to pan · scroll or pinch to zoom · click anything to edit it';
+  else st = selMode === 'pointer'
+    ? 'Drag a box to select · drag a selected thing to move them all · Space + drag to pan'
+    : 'Drag empty space to pan · scroll or pinch to zoom · click anything to edit it · V to select with a box';
   if (hoverWorld) st += `   ·   ${fmtLen(Math.abs(hoverWorld.x))}, ${fmtLen(Math.abs(hoverWorld.y))}`;
   $('#status').textContent = st;
 }
@@ -1040,8 +1056,32 @@ function openingAt(p, type){
 function setTool(t, data = {}){
   tool = t; toolData = data;
   svg.classList.toggle('draw', t !== 'select');
-  svg.classList.toggle('pan', t === 'select');
+  svg.classList.toggle('pan', t === 'select' && selMode === 'hand');
+  svg.classList.toggle('pointer', t === 'select' && selMode === 'pointer');
+  document.querySelectorAll('#modes button').forEach(b => b.classList.toggle('on', b.dataset.mode === selMode));
   renderLib(); if (doc) render();
+}
+function setSelMode(m){
+  selMode = m;
+  try { localStorage.setItem('floorplanner.mode', m); } catch {}
+  setTool('select');
+}
+// Everything inside the box: walls with both ends in it, other things by their centre.
+// Doors, windows and sockets on a selected wall come along too.
+function boxSelect(a, b, add){
+  const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+  const inBox = p => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
+  const hits = [];
+  doc.walls.forEach(w => { if (inBox(w.a) && inBox(w.b)) hits.push({kind:'wall', id:w.id}); });
+  const wallIn = id => hits.some(h => h.kind === 'wall' && h.id === id);
+  doc.openings.forEach(o => { const w = getWall(o.wallId);
+    if (w && (wallIn(w.id) || inBox(V.add(w.a, V.mul(wallDir(w), o.offset))))) hits.push({kind:'opening', id:o.id}); });
+  doc.items.forEach(it => { if (inBox(it)) hits.push({kind:'item', id:it.id}); });
+  doc.elec.forEach(e => { if ((e.wall && wallIn(e.wall.id)) || inBox(elecPos(e))) hits.push({kind:'elec', id:e.id}); });
+  doc.labels.forEach(l => { if (inBox(l)) hits.push({kind:'label', id:l.id}); });
+  const list = add ? selMembers().map(m => ({kind:m.kind, id:m.id})) : [];
+  hits.forEach(h => { if (!list.some(m => m.kind === h.kind && m.id === h.id)) list.push(h); });
+  setSelList(list);
 }
 function finishWallChain(){ toolData = {}; render(); }
 
@@ -1317,6 +1357,7 @@ svg.addEventListener('pointerdown', e => {
       sel = {kind:el.dataset.kind, id:el.dataset.id};
       startMoveDrag(p, e); render(); return;
     }
+    if (selMode === 'pointer'){ drag = {type:'box', a:p, b:p, sx:e.clientX, sy:e.clientY, moved:false, add:e.shiftKey || e.metaKey || e.ctrlKey}; return; }
     startPan(e, true); return;
   }
   if (tool === 'wall'){
@@ -1401,6 +1442,7 @@ svg.addEventListener('pointermove', e => {
       view.cx = drag.cx - (e.clientX - drag.sx)/view.scale; view.cy = drag.cy - (e.clientY - drag.sy)/view.scale; render(); return;
     }
     if (drag.type === 'room'){ toolData.b = snapGrid(p); renderOverlay(); return; }
+    if (drag.type === 'box'){ drag.b = p; renderOverlay(); return; }
     if (!drag.moved) return;
     if (drag.group){ const delta = V.sub(p, drag.start); groupMove(drag.group, e.shiftKey ? delta : snapGrid(delta)); render(); return; }
     const obj = selected(); if (!obj) return;
@@ -1463,6 +1505,10 @@ svg.addEventListener('pointerup', e => {
   if (!drag) return;
   const d = drag; drag = null; svg.classList.remove('panning');
   if (d.type === 'pan'){ if (!d.moved && d.clickDeselect && sel){ sel = null; render(); } return; }
+  if (d.type === 'box'){
+    if (d.moved) boxSelect(d.a, d.b, d.add); else if (!d.add) sel = null;
+    render(); return;
+  }
   if (d.type === 'room'){
     const a = toolData.a, b = toolData.b; toolData = {};
     const w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
@@ -1542,7 +1588,8 @@ document.addEventListener('keydown', e => {
   if (e.key === 'ArrowRight'){ e.preventDefault(); nudge(step, 0); return; }
   if (e.key === 'ArrowUp'){ e.preventDefault(); nudge(0, -step); return; }
   if (e.key === 'ArrowDown'){ e.preventDefault(); nudge(0, step); return; }
-  if (k === 'v') setTool('select');
+  if (k === 'v') setSelMode('pointer');
+  else if (k === 'h') setSelMode('hand');
   else if (k === 'w') setTool('wall');
   else if (k === 'd') setTool('opening', {type:'door'});
   else if (k === 'n') setTool('opening', {type:'window'});
@@ -1554,7 +1601,8 @@ document.addEventListener('keydown', e => {
   else if (k === '=' || k === '+') zoomAt(1.25);
   else if (k === '-') zoomAt(.8);
 });
-document.addEventListener('keyup', e => { if (e.key === ' '){ spaceDown = false; svg.classList.toggle('pan', tool === 'select'); } });
+document.addEventListener('keyup', e => { if (e.key === ' '){ spaceDown = false; svg.classList.toggle('pan', tool === 'select' && selMode === 'hand'); } });
+document.querySelectorAll('#modes button').forEach(b => b.addEventListener('click', () => setSelMode(b.dataset.mode)));
 
 /* ================= library panel ================= */
 function previewSVG(inner, w, h){
@@ -1701,7 +1749,7 @@ function renderPanel(){
         <kbd>W</kbd><span>Draw walls</span><kbd>D</kbd> <span>Door</span><kbd>N</kbd><span>Window</span><kbd>T</kbd><span>Label</span><kbd>M</kbd><span>Measure</span>
         <kbd>R</kbd><span>Rotate selected 90°</span><kbd>] · [</kbd><span>Bring to front · send to back</span><kbd>⌘/Ctrl C · V</kbd><span>Copy · paste at mouse</span><kbd>⌘/Ctrl D</kbd><span>Duplicate</span><kbd>Del</kbd><span>Delete</span><kbd>⌘/Ctrl click</kbd><span>Select several</span>
         <kbd>Arrows</kbd><span>Nudge 1 cm (Shift: 10)</span><kbd>⌘/Ctrl Z</kbd><span>Undo</span><kbd>F</kbd><span>Fit to screen</span>
-        <kbd>Space</kbd><span>Hold + drag to pan</span><kbd>Shift</kbd><span>Turn off snapping</span>
+        <kbd>V · H</kbd><span>Pointer (box select) · hand (pan)</span><kbd>Space</kbd><span>Hold + drag to pan</span><kbd>Shift</kbd><span>Turn off snapping</span>
       </div>`;
   } else if (sel.kind === 'wall'){
     h += `<h3>Wall</h3>` + fld('Inside length', num('pLen', insideLen(obj), 'cm', 'min="1"')) +
